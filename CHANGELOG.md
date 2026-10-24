@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-10-24
 
 ### Fixed
 
@@ -39,5 +39,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - First release: reading Sypex Geo 2.2 databases (`SxGeo.dat`, `SxGeoCity.dat`, `SxGeoMax.dat`), `country`, `countryId`, `lookup`, `info`.
 
-[1.1.0]: https://github.com/row2002/sypexgeo-kotlin/compare/1.0.0...HEAD
+[1.1.0]: https://github.com/row2002/sypexgeo-kotlin/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/row2002/sypexgeo-kotlin/releases/tag/1.0.0
