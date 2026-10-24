@@ -1,7 +1,7 @@
 # sypexgeo-kotlin
 
 [![CI](https://github.com/row2002/sypexgeo-kotlin/actions/workflows/ci.yml/badge.svg)](https://github.com/row2002/sypexgeo-kotlin/actions/workflows/ci.yml)
-[![JitPack](https://jitpack.io/v/row2002/sypexgeo-kotlin.svg)](https://jitpack.io/#row2002/sypexgeo-kotlin)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.row2002/sypexgeo-kotlin)](https://central.sonatype.com/artifact/io.github.row2002/sypexgeo-kotlin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Русский** | [English](README.en.md)
@@ -15,11 +15,10 @@
 ```kotlin
 repositories {
     mavenCentral()
-    maven("https://jitpack.io") { content { includeGroup("com.github.row2002") } }
 }
 
 dependencies {
-    implementation("com.github.row2002:sypexgeo-kotlin:1.1.0")
+    implementation("io.github.row2002:sypexgeo-kotlin:1.1.0")
 }
 ```
 
@@ -77,18 +76,17 @@ println(geo.lookup("77.88.8.8")?.city?.nameRu)   // Москва
 
 ## Установка
 
-Библиотека публикуется через [JitPack](https://jitpack.io/#row2002/sypexgeo-kotlin) (в Maven Central её пока нет). Фильтр `content` нужен, чтобы Gradle обращался к JitPack только за этой библиотекой.
+Библиотека публикуется в [Maven Central](https://central.sonatype.com/artifact/io.github.row2002/sypexgeo-kotlin).
 
 **Gradle (Kotlin DSL)**
 
 ```kotlin
 repositories {
     mavenCentral()
-    maven("https://jitpack.io") { content { includeGroup("com.github.row2002") } }
 }
 
 dependencies {
-    implementation("com.github.row2002:sypexgeo-kotlin:1.1.0")
+    implementation("io.github.row2002:sypexgeo-kotlin:1.1.0")
 }
 ```
 
@@ -97,25 +95,21 @@ dependencies {
 ```groovy
 repositories {
     mavenCentral()
-    maven {
-        url 'https://jitpack.io'
-        content { includeGroup 'com.github.row2002' }
-    }
 }
 
 dependencies {
-    implementation 'com.github.row2002:sypexgeo-kotlin:1.1.0'
+    implementation 'io.github.row2002:sypexgeo-kotlin:1.1.0'
 }
 ```
 
-**Version catalog** (`gradle/libs.versions.toml`; репозиторий JitPack подключается, как показано выше, или в `dependencyResolutionManagement` в `settings.gradle.kts`)
+**Version catalog** (`gradle/libs.versions.toml`)
 
 ```toml
 [versions]
 sypexgeo = "1.1.0"
 
 [libraries]
-sypexgeo = { module = "com.github.row2002:sypexgeo-kotlin", version.ref = "sypexgeo" }
+sypexgeo = { module = "io.github.row2002:sypexgeo-kotlin", version.ref = "sypexgeo" }
 ```
 
 ```kotlin
@@ -127,19 +121,14 @@ dependencies {
 **Maven**
 
 ```xml
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
-
 <dependency>
-    <groupId>com.github.row2002</groupId>
+    <groupId>io.github.row2002</groupId>
     <artifactId>sypexgeo-kotlin</artifactId>
     <version>1.1.0</version>
 </dependency>
 ```
+
+Старая версия 1.0.0 опубликована только в JitPack: `com.github.row2002:sypexgeo-kotlin:1.0.0`.
 
 ## Где взять базу
 

@@ -1,8 +1,8 @@
 name: Release
 
-# Runs when a version tag is pushed (1.1.0 or v1.1.0): builds and tests the tag, publishes it to Maven Central if the
-# secrets are configured (see RELEASING.md) and creates a GitHub Release with the CHANGELOG.md section of that version
-# and the jars. JitPack needs nothing from here: it builds com.github.row2002:sypexgeo-kotlin:<tag> on first request.
+# Runs when a version tag is pushed (1.1.0 or v1.1.0): builds and tests the tag, publishes it to Maven Central as
+# io.github.row2002:sypexgeo-kotlin (needs the secrets from RELEASING.md) and creates a GitHub Release with the CHANGELOG.md
+# section of that version and the jars. JitPack (com.github.row2002, not advertised) builds tags on its own on request.
 on:
   push:
     tags: ['v*', '[0-9]*']

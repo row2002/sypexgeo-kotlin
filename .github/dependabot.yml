@@ -5,8 +5,6 @@ updates:
     schedule:
       interval: monthly
     ignore:
-      # pinned: 0.35+ needs Gradle 9
-      - dependency-name: "com.vanniktech.maven.publish*"
       # no minor updates: keeps the Kotlin 1.9-compatible build (language/API version 1.9, kotlin-stdlib 1.9.25)
       - dependency-name: "org.jetbrains.kotlin.jvm*"
         update-types: ["version-update:semver-minor"]

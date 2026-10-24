@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `lookup(InetAddress)`, `country(InetAddress)`, `countryId(InetAddress)`, using the address bytes; `null` for an `Inet6Address`.
 - IP strings in the IPv4-mapped IPv6 form `::ffff:1.2.3.4` (the prefix in any case).
 - `name(Locale)` on `Country`, `Region` and `City`.
-- Maven Central publishing setup (`io.github.row2002:sypexgeo-kotlin`, not published yet); JitPack coordinates `com.github.row2002:sypexgeo-kotlin` are unchanged.
+- Published to Maven Central as `io.github.row2002:sypexgeo-kotlin`.
 - README: quick start, installation for Gradle (Kotlin/Groovy, version catalog) and Maven, recipes (Spring Boot, client IP behind a proxy, servlet filter, Ktor, reloading, Android), FAQ, measured performance.
 - Hermetic tests on synthetic databases built by the tests, checked at every range boundary.
 

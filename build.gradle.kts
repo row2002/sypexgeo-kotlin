@@ -6,13 +6,13 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 plugins {
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.dokka") version "2.0.0"
-    id("com.vanniktech.maven.publish") version "0.34.0" // 0.35+ needs Gradle 9
+    id("com.vanniktech.maven.publish") version "0.35.0"
     `java-library`
 }
 
 // JitPack (sets JITPACK=true) serves com.github.row2002:sypexgeo-kotlin:<tag>; Maven Central uses io.github.row2002
 group = if (System.getenv("JITPACK") == "true") "com.github.row2002" else "io.github.row2002"
-version = findProperty("version")?.takeIf { it != "unspecified" } ?: "1.1.0" // JitPack passes -Pversion=<tag>
+version = findProperty("version")?.takeIf { it != "unspecified" } ?: "1.1.0" // the release workflow and JitPack pass -Pversion=<tag>
 
 repositories {
     mavenCentral()
