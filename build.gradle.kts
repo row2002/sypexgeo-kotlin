@@ -6,7 +6,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 plugins {
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.dokka") version "2.0.0"
-    id("com.vanniktech.maven.publish") version "0.34.0" // 0.35+ needs newer Gradle/Kotlin
+    id("com.vanniktech.maven.publish") version "0.34.0" // 0.35+ needs Gradle 9
     `java-library`
 }
 
@@ -75,8 +75,8 @@ mavenPublishing {
     coordinates(group.toString(), "sypexgeo-kotlin", version.toString())
     // ./gradlew publishToMavenCentral: credentials in mavenCentralUsername/mavenCentralPassword, see RELEASING.md
     publishToMavenCentral()
-    // signing is required by Maven Central only; JitPack and publishToMavenLocal work without a key
-    if (providers.gradleProperty("signingInMemoryKey").isPresent) signAllPublications()
+    // signing is required by Maven Central only; JitPack and publishToMavenLocal work without a key (or with a blank one)
+    if (!providers.gradleProperty("signingInMemoryKey").orNull.isNullOrBlank()) signAllPublications()
     pom {
         name = "sypexgeo-kotlin"
         description = "Kotlin reader for Sypex Geo 2.2 databases: country, region and city by IPv4 address"
@@ -92,7 +92,7 @@ mavenPublishing {
         developers {
             developer {
                 id = "row2002"
-                name = "row2002"
+                name = "aevseev"
                 url = "https://github.com/row2002"
             }
         }

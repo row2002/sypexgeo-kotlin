@@ -37,7 +37,7 @@ import java.io.File
 
 val geo = SxGeo(File("SxGeoCity.dat"))           // once, at application start; thread-safe
 println(geo.country("77.88.8.8"))                // RU
-println(geo.lookup("93.73.35.74")?.city?.nameEn) // Kyiv
+println(geo.lookup("77.88.8.8")?.city?.nameEn)   // Moscow
 ```
 
 ## Contents
@@ -73,7 +73,7 @@ Never add both: they have the same package and class names (`io.github.row2002.s
 - The database is loaded into memory once; a lookup takes about 2 µs, a country lookup well under 1 µs (see [Performance](#performance)).
 - Instances are immutable and thread-safe, so create one per application.
 - UTF-8, CP1251 and Latin-1 database editions are supported.
-- A port of the official `SxGeo.php` 2.2.3 with a fixed search: an IP equal to the first address of a range resolves to that range (see [Differences from SxGeo.php](#differences-from-sxgeophp)). Tests check the search at every range boundary of synthetic databases and on the real databases.
+- A port of the official `SxGeo.php` 2.2.3 with a fixed search: an IP equal to the first address of a range resolves to that range (see [Differences from SxGeo.php](#differences-from-sxgeophp)). Every range boundary is checked on synthetic databases in the tests; tests on the real databases check random addresses.
 
 ## Installation
 
@@ -147,8 +147,8 @@ Download a database from [sypexgeo.net/ru/download](https://sypexgeo.net/ru/down
 
 | File | Contents | Size |
 |---|---|---|
-| `SxGeo.dat` ([SxGeoCountry.zip](https://sypexgeo.net/files/SxGeoCountry.zip)) | countries only | ~0.8 MB |
-| `SxGeoCity.dat` ([SxGeoCity_utf8.zip](https://sypexgeo.net/files/SxGeoCity_utf8.zip)) | countries, regions, cities | ~13 MB |
+| `SxGeo.dat` ([SxGeoCountry.zip](https://sypexgeo.net/files/SxGeoCountry.zip)) | countries only | ~1 MB |
+| `SxGeoCity.dat` ([SxGeoCity_utf8.zip](https://sypexgeo.net/files/SxGeoCity_utf8.zip)) | countries, regions, cities | a few tens of MB |
 | `SxGeoMax.dat` (paid City Max) | the same, plus extra fields (time zones, etc.) | — |
 
 ```bash
@@ -156,7 +156,7 @@ curl -fLO https://sypexgeo.net/files/SxGeoCountry.zip && unzip SxGeoCountry.zip 
 curl -fLO https://sypexgeo.net/files/SxGeoCity_utf8.zip && unzip SxGeoCity_utf8.zip SxGeoCity.dat
 ```
 
-The databases are updated regularly, roughly monthly: re-download them at least once a month (see [reloading without a restart](#reloading-the-database-without-a-restart)).
+The databases are updated regularly: the download page and `info.created` show the build date, and a new database can be picked up without a restart (see [reloading without a restart](#reloading-the-database-without-a-restart)).
 
 ## Usage
 
@@ -177,8 +177,8 @@ if (info != null) {
     info.country.name(Locale("ru"))  // "Украина"
     info.region?.nameEn              // "Kyiv"
     info.region?.iso                 // "UA-30"
-    info.city?.nameEn                // "Kyiv"
-    info.city?.name(Locale.ENGLISH)  // "Kyiv"
+    info.city?.nameEn                // "Kiev"
+    info.city?.name(Locale.ENGLISH)  // "Kiev"
     info.city?.lat                   // 50.45466
     info.city?.lon                   // 30.5238
 }
@@ -287,7 +287,8 @@ geo.info.hasCities // true
 
 - `IllegalArgumentException` from the constructors if the data is not a Sypex Geo 2.2 database of the supported version, is corrupted (header, indexes, record formats) or truncated. The `Path` and `File` constructors start the message with the file name; see [what the errors mean](#what-do-the-constructor-errors-mean).
 - `IOException` from the `Path`, `File` and `InputStream` constructors if the data cannot be read.
-- `IllegalStateException` (`"Corrupted Sypex Geo database: ..."`) from `country`, `countryId` and `lookup` if a database record they need is corrupted: it points outside its section or runs past its end. Official databases never do this.
+- `IllegalStateException` (`"Corrupted Sypex Geo database: ..."`) from `country`, `countryId` and `lookup` if a database record they need is corrupted: it points outside its section or runs past its end. This does not happen with an intact database.
+- `country()` and `countryId()` decode only the country id of the record, so a corrupted record is reported by `lookup()` (`IllegalStateException`) but may not be by `country()`.
 
 A malformed IP never causes an exception; the result is simply `null`.
 
@@ -350,17 +351,19 @@ class GeoService(@Value("\${sypexgeo.path}") private val path: Path) {
 
 ### Client IP behind a proxy
 
-Do not parse `X-Forwarded-For` yourself: any client can send that header, and taking its first value lets anyone pick their country. Let the server replace the remote address with the client address taken from headers of **trusted** proxies only, then use `request.remoteAddr`:
+Do not parse `X-Forwarded-For` yourself: any client can send that header, and its first value is whatever the client wrote, so taking it lets anyone pick their country. Let the server replace the remote address with the client address from the headers of your **trusted** proxies only, and use `request.getRemoteAddr()` (in Ktor, `call.request.origin.remoteAddress`):
 
-- Spring Boot: `server.forward-headers-strategy=native` (Tomcat's `RemoteIpValve`; by default it trusts proxies in private networks, set `server.tomcat.remoteip.internal-proxies` for others); or `framework` (`ForwardedHeaderFilter`) if the proxy is the only way to reach the application.
-- Plain Tomcat: `org.apache.catalina.valves.RemoteIpValve`; Jetty: `ForwardedRequestCustomizer`.
-- Ktor: the `XForwardedHeaders` plugin, then `call.request.origin.remoteAddress`. Install it only when the application is reachable through your proxy alone (see [Ktor](#ktor)).
+- Spring Boot on Tomcat: `server.forward-headers-strategy=native`. This is Tomcat's `RemoteIpValve`: it trusts only known proxies (private network addresses by default, set `server.tomcat.remoteip.internal-proxies` for others) and reads `X-Forwarded-For` from right to left. Avoid `framework` (`ForwardedHeaderFilter`) and Jetty's `ForwardedRequestCustomizer` unless your proxy overwrites `X-Forwarded-For`: they take its first, client-supplied value.
+- Standalone Tomcat: `<Valve className="org.apache.catalina.valves.RemoteIpValve" />` in `server.xml`.
+- Ktor: the `XForwardedHeaders` plugin (dependency `io.ktor:ktor-server-forwarded-header`), configured for your proxy chain: `install(XForwardedHeaders) { useLastProxy() }` for exactly one proxy that appends to `X-Forwarded-For`, `skipLastProxies(N - 1)` for N such proxies.
+
+Only enable this when the application is reachable through your proxies alone; otherwise clients can spoof their address.
 
 ### Servlet filter
 
 ```kotlin
 import io.github.row2002.sypexgeo.SxGeo
-import jakarta.servlet.FilterChain
+import jakarta.servlet.FilterChain // javax.servlet.* for Servlet 4 / Spring Boot 2
 import jakarta.servlet.http.HttpFilter
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -374,7 +377,11 @@ class CountryFilter(private val geo: SxGeo) : HttpFilter() {
 }
 ```
 
+In Spring Boot, declaring the filter as a bean is enough: `@Bean fun countryFilter(geo: SxGeo) = CountryFilter(geo)` applies it to all requests. To set URL patterns or the order, return a `FilterRegistrationBean<CountryFilter>` instead.
+
 ### Ktor
+
+The `XForwardedHeaders` plugin from the `io.ktor:ktor-server-forwarded-header` dependency takes the client address from the proxy headers; configure it for your proxy chain (see [client IP behind a proxy](#client-ip-behind-a-proxy)):
 
 ```kotlin
 import io.github.row2002.sypexgeo.SxGeo
@@ -387,7 +394,7 @@ import java.io.File
 
 fun Application.geoModule() {
     val geo = SxGeo(File("SxGeoCity.dat"))
-    install(XForwardedHeaders) // only behind a trusted reverse proxy, otherwise clients can forge the address
+    install(XForwardedHeaders) { useLastProxy() } // exactly one proxy that appends; N proxies: skipLastProxies(N - 1)
     routing {
         get("/country") {
             call.respondText(geo.country(call.request.origin.remoteAddress) ?: "unknown")
@@ -441,7 +448,7 @@ fun openGeo(context: Context): SxGeo = context.assets.open("SxGeo.dat").use(::Sx
 ```
 
 - The API uses `java.time.Instant` (`DbInfo.created`) and `java.nio.file.Path` (a constructor): use `minSdk 26`, or core library desugaring for older devices and avoid the `Path` constructor there.
-- Prefer the country database `SxGeo.dat` on mobile (~0.8 MB instead of ~13 MB in memory and in the APK).
+- Prefer the country database `SxGeo.dat` on mobile (~1 MB instead of a few tens of MB in memory and in the APK).
 - The library is not tested on devices; reports are welcome.
 
 ## FAQ
@@ -452,25 +459,28 @@ No. The Sypex Geo format has IPv4 data only; IPv6 addresses (except the `::ffff:
 
 ### Which database should I choose?
 
-`SxGeo.dat` if you only need the country: it is ~0.8 MB instead of ~13 MB and a lookup is several times faster (~0.2 µs instead of ~2 µs, see [Performance](#performance)). `SxGeoCity.dat` for regions and cities; `country()` and `countryId()` on it are also fast. `SxGeoMax.dat` (paid) adds fields like time zones, available through `fields`.
+`SxGeo.dat` if you need the country only: it is ~1 MB instead of a few tens of MB, and every call (`country()`, `countryId()`, `lookup()`) takes ~0.2 µs. `SxGeoCity.dat` for regions and cities with Russian and English names: `lookup()` on it takes ~2 µs, `country()` and `countryId()` ~0.4 µs (see [Performance](#performance)). `SxGeoMax.dat` (paid) adds fields such as time zones.
 
 ### How often are the databases updated?
 
-Roughly monthly. Re-download at least once a month and reload without a restart, see [the recipe](#reloading-the-database-without-a-restart). `info.created` shows the build date of the loaded file.
+Regularly: check the date of the latest build on the [download page](https://sypexgeo.net/ru/download/), and the date of the loaded file with `info.created`. A new database can be picked up without a restart, see [the recipe](#reloading-the-database-without-a-restart).
 
 ### What are `AP`, `EU`, `A1`, `O1`?
 
-Special country codes of Sypex Geo (the same as in old MaxMind databases): `AP` the Asia/Pacific region, `EU` Europe, without a specific country; `A1` an anonymous proxy; `O1` other country. They are not ISO 3166 codes, so handle them before calling `Locale("", iso)` or showing a flag.
+Special codes in the Sypex Geo country table, inherited from the legacy GeoIP country list: `AP` the Asia/Pacific region and `EU` Europe, without a specific country; `A1` an anonymous proxy; `O1` other country. They are not ISO 3166-1 country codes: handle them yourself before looking up a country name or showing a flag. `XK` (Kosovo) is a user-assigned ISO 3166-1 code, and the JDK knows it.
 
 ### How do I get country names with `SxGeo.dat`?
 
-The country database has ISO codes only; names come from the JDK:
+The country database has ISO codes only; take the names from the JDK:
 
 ```kotlin
 val iso = geo.country("77.88.8.8") ?: return
-Locale("", iso).getDisplayCountry(Locale("ru")) // "Россия"
-Locale("", iso).getDisplayCountry(Locale.ENGLISH) // "Russia"
+val country = Locale("", iso) // on JDK 19+: Locale.of("", iso)
+country.getDisplayCountry(Locale("ru"))   // "Россия"
+country.getDisplayCountry(Locale.ENGLISH) // "Russia"
 ```
+
+For `AP`, `A1` and `O1` `getDisplayCountry` returns the code itself, and for `EU` it returns `"European Union"`, which is not what Sypex Geo means (Europe): handle these four codes yourself. On JDK 19+ create the locale with `Locale.of("", iso)`: the `new Locale("", iso)` constructor (`Locale("", iso)` in Kotlin) works on JDK 8+ but is deprecated since JDK 19.
 
 ### What do the constructor errors mean?
 
@@ -489,17 +499,17 @@ Locale("", iso).getDisplayCountry(Locale.ENGLISH) // "Russia"
 
 ## Sypex Geo vs MaxMind GeoLite2
 
-| | Sypex Geo (this library) | MaxMind GeoLite2 |
+| | Sypex Geo | MaxMind GeoLite2 |
 |---|---|---|
 | Getting the database | direct download, no account | free account, licence key, GeoLite2 EULA |
 | IPv6 | no | yes |
 | Other data | City Max: time zones and more | ASN database, time zones, postal codes |
 | Strengths | Russia and CIS, Russian names of all countries, regions and cities | worldwide coverage, many languages |
-| Java/Kotlin library | this one, no dependencies besides `kotlin-stdlib` | `com.maxmind.geoip2:geoip2` (with Jackson) |
+| Java/Kotlin library | sypexgeo-java (no dependencies) or sypexgeo-kotlin (`kotlin-stdlib` only) | `com.maxmind.geoip2:geoip2` (with Jackson) |
 
 ## Performance
 
-Measured on JDK 21, a cloud VM with an Intel Xeon 2.8 GHz (4 vCPU), one thread, 1,000,000 random IP strings `1.0.0.0`–`223.255.255.255`, after warm-up (a simple timing loop, not JMH); `SxGeo.dat` from January 2025 and a December 2014 `SxGeoCity.dat` (1.7 million ranges):
+Measured on JDK 21, a cloud VM with an Intel Xeon 2.8 GHz (4 vCPU), one thread, a simple timing loop (not JMH): 1,000,000 random IPv4 strings from `1.0.0.0`–`223.255.255.255`, each method called once per string in 8 passes, the first 4 of them warm-up; `SxGeo.dat` from January 2025 and a December 2014 `SxGeoCity.dat` (1.7 million ranges):
 
 | Database | Method | Time per call |
 |---|---|---|
@@ -511,7 +521,7 @@ Measured on JDK 21, a cloud VM with an Intel Xeon 2.8 GHz (4 vCPU), one thread, 
 
 ## Differences from SxGeo.php
 
-- An IP that is exactly the first address of a range resolves to that range. `SxGeo.php` 2.2.3 sometimes answers with the neighbouring range (for example, `1.4.0.0` resolves to China instead of Australia). Version 1.0.0 of this library still had the `SxGeo.php` behaviour; fixed in 1.1.0.
+- An IP that is exactly the first address of a range resolves to that range. `SxGeo.php` 2.2.3 sometimes answers with the neighbouring range. Version 1.0.0 of this library still had the `SxGeo.php` behaviour; fixed in 1.1.0.
 - The country in `lookup` comes from the city record (see [API](#api)), not from the region as in `getCityFull()`.
 - A corrupted database causes an exception (see [Exceptions](#exceptions)) instead of PHP warnings and garbage results.
 - `::ffff:1.2.3.4` is accepted; `ip2long` in PHP rejects it.
@@ -530,4 +540,4 @@ The main tests build synthetic databases themselves and check the answers at eve
 
 The library is under the [MIT](LICENSE) license. The algorithm is based on the official `SxGeo.php` (© zapimir, BINOVATOR, BSD license).
 
-The library ships no data. The Sypex Geo databases are © BINOVATOR, [sypexgeo.net](https://sypexgeo.net/), and are distributed under the terms published there: check them before you redistribute `.dat` files (for example inside an application, an APK or a Docker image).
+The library ships no geolocation data. The Sypex Geo databases are © BINOVATOR, [sypexgeo.net](https://sypexgeo.net/), and are distributed under the terms published there: check them before you redistribute `.dat` files (for example inside an application, an APK or a Docker image).

@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `IllegalArgumentException` messages say what the data looks like instead (a ZIP archive, an HTML page, a MaxMind `.mmdb` file, an empty or too short file); the `Path` and `File` constructors start them with the file name.
 - When a city has no region, or its region belongs to another country, `lookup` returns the full country record (names, coordinates, fields) instead of only `id` and `iso`.
 - The `ByteArray` constructor copies the array.
-- `country()` and `countryId()` on city databases read only the country id of the record: ~2.5 times faster on `SxGeoCity.dat`.
+- `country()` and `countryId()` on city databases read only the country id of the record: ~2.5 times faster on `SxGeoCity.dat`. They decode only the country id, so a corrupted record is reported by `lookup()` (`IllegalStateException`) but may not be by `country()` and `countryId()`.
 - The published POM and Gradle module depend on `kotlin-stdlib` 1.9.25, so Kotlin 1.9 projects can use the library.
 - The jar has `Automatic-Module-Name: io.github.row2002.sypexgeo.kotlin`; the `-javadoc` jar contains the Dokka HTML documentation; the POM has license, SCM and developer information.
 

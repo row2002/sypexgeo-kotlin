@@ -18,7 +18,7 @@ body:
     id: info
     attributes:
       label: Database info
-      description: "The output of `println(geo.info)`, and the database file name."
+      description: "Output of `println(geo.info)`, or the constructor exception if the database does not open, and the file name."
       placeholder: "DbInfo(version=2.2, created=..., type=SxGeo City EN, charset=UTF-8, hasCities=true, ipBlocks=...)"
     validations:
       required: true
@@ -26,7 +26,9 @@ body:
     id: ip
     attributes:
       label: IP address
-      description: The IP (or IP string) that gives a wrong result.
+      description: The IP (or IP string) that gives a wrong result, if the problem is about an IP.
+    validations:
+      required: false
   - type: textarea
     id: expected
     attributes:

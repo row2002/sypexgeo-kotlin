@@ -1,47 +1,64 @@
 name: Release
 
-# Runs when a version tag is pushed (1.1.0 or v1.1.0): builds, publishes to Maven Central if the secrets are
-# configured (see RELEASING.md) and creates a GitHub Release with the CHANGELOG section of that version.
-# JitPack needs nothing from here: it builds com.github.row2002:sypexgeo-kotlin:<tag> on first request.
+# Runs when a version tag is pushed (1.1.0 or v1.1.0): builds and tests the tag, publishes it to Maven Central if the
+# secrets are configured (see RELEASING.md) and creates a GitHub Release with the CHANGELOG.md section of that version
+# and the jars. JitPack needs nothing from here: it builds com.github.row2002:sypexgeo-kotlin:<tag> on first request.
 on:
   push:
     tags: ['v*', '[0-9]*']
 
 permissions:
-  contents: write
+  contents: write # create the GitHub release
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
-      - id: version
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Version from the tag
+        id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - name: Build
-        run: ./gradlew build -Pversion=${{ steps.version.outputs.version }}
+      - name: Build (compile, tests, main, sources and javadoc jars)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./gradlew build sourcesJar dokkaJavadocJar -Pversion="$VERSION"
       - name: Publish to Maven Central
-        if: env.ORG_GRADLE_PROJECT_mavenCentralUsername != '' && env.ORG_GRADLE_PROJECT_mavenCentralPassword != '' && env.ORG_GRADLE_PROJECT_signingInMemoryKey != ''
-        # uploads a deployment to the Central Portal; it is published after "Publish" there (RELEASING.md)
-        run: ./gradlew publishToMavenCentral -Pversion=${{ steps.version.outputs.version }}
-      - name: Skip Maven Central
-        if: env.ORG_GRADLE_PROJECT_mavenCentralUsername == '' || env.ORG_GRADLE_PROJECT_mavenCentralPassword == '' || env.ORG_GRADLE_PROJECT_signingInMemoryKey == ''
-        run: echo "::notice::Maven Central secrets are not configured, skipping the Maven Central upload (see RELEASING.md)"
-      - name: Create GitHub Release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ORG_GRADLE_PROJECT_mavenCentralUsername" ] || [ -z "$ORG_GRADLE_PROJECT_mavenCentralPassword" ] \
+              || [ -z "$ORG_GRADLE_PROJECT_signingInMemoryKey" ]; then
+            echo "::notice::Maven Central secrets are not configured: skipping the Maven Central publication (see RELEASING.md)"
+            exit 0
+          fi
+          # uploads the signed deployment; the Central Portal releases it automatically once it passes validation
+          ./gradlew publishAndReleaseToMavenCentral -Pversion="$VERSION"
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # the body of the "## [<version>] - <date>" section, up to the next "## [" heading or the link definitions
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^(## )?\[/ { exit } on { print }' CHANGELOG.md > notes.md
+          if ! grep -q "^## \[$VERSION\] - [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md has no '## [$VERSION] - YYYY-MM-DD' heading (see RELEASING.md)"
+          fi
+          if [ -z "$(tr -d '[:space:]' < notes.md)" ]; then echo "See [CHANGELOG.md](CHANGELOG.md)." > notes.md; fi
+          cat notes.md
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # the "## [<version>]" section of CHANGELOG.md, without its heading
-          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^(## )?\[/ { exit } on' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "See [CHANGELOG.md](CHANGELOG.md)." > notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md \
+            "build/libs/sypexgeo-kotlin-$VERSION.jar" \
+            "build/libs/sypexgeo-kotlin-$VERSION-sources.jar" \
+            "build/libs/sypexgeo-kotlin-$VERSION-javadoc.jar"
