@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # no minor updates: keeps the Kotlin 1.9-compatible build (language/API version 1.9, kotlin-stdlib 1.9.25)
+      - dependency-name: "org.jetbrains.kotlin.jvm*"
+        update-types: ["version-update:semver-minor"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # gradle/actions v6+ switches to proprietary caching by default; stay on v5 (open-source caching)
+      - dependency-name: "gradle/actions*"
+        update-types: ["version-update:semver-major"]
