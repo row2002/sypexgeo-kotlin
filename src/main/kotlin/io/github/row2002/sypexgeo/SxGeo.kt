@@ -30,7 +30,8 @@ import java.util.Locale
  * instead (a ZIP archive, an HTML page, a MaxMind database, an empty file), and the [Path] and [File]
  * constructors start it with the file name. Lookups never throw for a valid database;
  * if a record they need turns out to be corrupted (it points outside its section or runs past its end),
- * they throw [IllegalStateException] ("Corrupted Sypex Geo database: ...").
+ * they throw [IllegalStateException] ("Corrupted Sypex Geo database: ..."). [country] and [countryId] decode
+ * only the country id of a record, so a corrupted record is reported by [lookup] but may not be by them.
  */
 class SxGeo private constructor(bytes: ByteArray, copy: Boolean, source: Any?) {
 
@@ -168,13 +169,19 @@ class SxGeo private constructor(bytes: ByteArray, copy: Boolean, source: Any?) {
 
     /**
      * ISO 3166-1 alpha-2 country code for [ip] (dotted IPv4), or `null` if unknown. Works with any database.
-     * @throws IllegalStateException if the database is corrupted
+     *
+     * Decodes only the country id of the record (the whole record only if a variable-size field comes before the id),
+     * so a corrupted record is reported by [lookup] but may not be by this method.
+     * @throws IllegalStateException if the database is corrupted where the country id is read
      */
     fun country(ip: String?): String? = isoOf(idOf(parseIpv4(ip)))
 
     /**
      * Sypex Geo country id for [ip] (dotted IPv4), or `null` if unknown. Works with any database.
-     * @throws IllegalStateException if the database is corrupted
+     *
+     * Decodes only the country id of the record (the whole record only if a variable-size field comes before the id),
+     * so a corrupted record is reported by [lookup] but may not be by this method.
+     * @throws IllegalStateException if the database is corrupted where the country id is read
      */
     fun countryId(ip: String?): Int? = idOf(parseIpv4(ip)).takeIf { it > 0 }
 

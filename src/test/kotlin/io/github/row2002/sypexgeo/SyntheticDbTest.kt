@@ -130,6 +130,43 @@ class SyntheticDbTest {
     }
 
     @Test
+    fun `country fast path keeps the bounds checks for multi-byte ids`() {
+        // 'S' country id at offset 6 and 'I' city country_id at offset 4: both end 8 bytes into the record
+        val pack = listOf(
+            "c6:code/S:id/c2:iso/n2:lat/n2:lon/b:name_ru/b:name_en",
+            "S:country_seek/M:id/b:name_ru/b:name_en/b:iso",
+            "I:region_seek/I:country_id/M:id/N5:lat/N5:lon/b:name_ru/b:name_en",
+        )
+        val db = TestDb(city = true, pack = pack)
+        db.countries.add(mapOf("id" to 1234, "name_en" to "Big"))
+        db.cities["k"] = TestDb.CityDef(mapOf("id" to 3, "name_en" to "Kyiv"), null, 70_000)
+        db.range("1.2.0.0", "1.2.0.255", Target.CountryAt(1234))
+        db.range("1.2.1.0", "1.2.1.255", Target.CityAt("k"))
+        db.build()
+        val sections = listOf("country" to db.countrySize, "city" to db.countrySize + db.citySize)
+        // records starting 1..7 bytes before the end of their section: the id does not fit (it would with `+ size` dropped)
+        for ((s, section) in sections.withIndex()) {
+            for (back in 1..8) db.range("1.${3 + s}.$back.0", "1.${3 + s}.$back.255", Target.Raw(section.second - back))
+        }
+        val geo = SxGeo(db.build())
+        assertEquals(1234, geo.countryId("1.2.0.4"))
+        assertEquals(70_000, geo.countryId("1.2.1.4"))
+        for ((s, section) in sections.withIndex()) {
+            for (back in 1..8) {
+                val ip = "1.${3 + s}.$back.4"
+                val expected = assertFailsWith<IllegalStateException>(ip) { geo.lookup(ip) }.message
+                assertTrue(expected!!.startsWith("Corrupted Sypex Geo database: ${section.first} record at offset "), expected)
+                if (back == 8) {
+                    geo.countryId(ip) // the id fits (the rest of the record does not): reads the record's last bytes
+                    continue
+                }
+                assertEquals(expected, assertFailsWith<IllegalStateException>(ip) { geo.country(ip) }.message)
+                assertEquals(expected, assertFailsWith<IllegalStateException>(ip) { geo.countryId(ip) }.message)
+            }
+        }
+    }
+
+    @Test
     fun `every main index granularity`() {
         // includes rangeLen values dividing the number of blocks, where the last index entry is the last chunk
         var lastChunkCovered = false
@@ -381,6 +418,13 @@ class SyntheticDbTest {
         assertEquals(prefix + mmdb, message(random.nextBytes(300_000) + marker + random.nextBytes(20_000)))
         assertEquals(prefix + mmdb, message(marker))
         assertEquals("Not a Sypex Geo database", message(marker + ByteArray(128 * 1024))) // too far from the end
+        // the marker is looked for in the last 128 KiB only
+        val mmdbTail = ByteArray(200_000)
+        marker.copyInto(mmdbTail, mmdbTail.size - 128 * 1024)
+        assertEquals(prefix + mmdb, message(mmdbTail))
+        ByteArray(marker.size).copyInto(mmdbTail, mmdbTail.size - 128 * 1024)
+        marker.copyInto(mmdbTail, mmdbTail.size - 128 * 1024 - 1) // starts before the last 128 KiB
+        assertEquals("Not a Sypex Geo database", message(mmdbTail))
         assertEquals(prefix + "file is empty or too short (0 bytes)", message(ByteArray(0)))
         assertEquals(prefix + "file is empty or too short (3 bytes)", message(bytes("SxG")))
         assertEquals(prefix + "file is empty or too short (39 bytes)", message(TestDb.random(city = false, seed = 1).build().copyOf(39)))
@@ -392,8 +436,13 @@ class SyntheticDbTest {
         val file = Files.createTempFile("sxgeo", ".zip")
         try {
             Files.write(file, byteArrayOf(0x50, 0x4B, 3, 4) + ByteArray(100))
-            assertEquals("$file: $prefix$zip", assertFailsWith<IllegalArgumentException> { SxGeo(file) }.message)
-            assertEquals("$file: $prefix$zip", assertFailsWith<IllegalArgumentException> { SxGeo(file.toFile()) }.message)
+            // the original exception is kept as the cause
+            for (e in listOf(assertFailsWith<IllegalArgumentException> { SxGeo(file) },
+                assertFailsWith<IllegalArgumentException> { SxGeo(file.toFile()) })) {
+                assertEquals("$file: $prefix$zip", e.message)
+                assertEquals<Class<*>?>(IllegalArgumentException::class.java, e.cause?.javaClass)
+                assertEquals(prefix + zip, e.cause?.message)
+            }
             Files.write(file, TestDb.random(city = false, seed = 1).build().let { it.copyOf(it.size - 1) })
             assertEquals("$file: Truncated Sypex Geo database", assertFailsWith<IllegalArgumentException> { SxGeo(file) }.message)
             assertEquals("$file: Truncated Sypex Geo database", assertFailsWith<IllegalArgumentException> { SxGeo(file.toFile()) }.message)
