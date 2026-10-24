@@ -60,10 +60,17 @@ class SxGeoTest {
     }
 
     @Test
-    fun `Inet4Address overload`() {
+    fun `InetAddress overloads and IPv4-mapped IPv6`() {
         val address = InetAddress.getByAddress(byteArrayOf(77, 88, 8, 8)) as Inet4Address
         assertEquals("RU", city.country(address))
         assertEquals(city.lookup("77.88.8.8"), city.lookup(address))
+        val mapped = InetAddress.getByName("::ffff:93.73.35.74")
+        assertEquals("UA", city.country(mapped))
+        assertEquals(city.countryId("93.73.35.74"), city.countryId(mapped))
+        assertEquals(city.lookup("93.73.35.74"), city.lookup(mapped))
+        assertEquals(city.lookup("93.73.35.74"), city.lookup("::FFFF:93.73.35.74"))
+        assertEquals("RU", country.country(InetAddress.getByName("::ffff:77.88.8.8")))
+        assertNull(city.lookup(InetAddress.getByName("2a02:6b8::feed:0ff")))
     }
 
     @Test

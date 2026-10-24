@@ -27,6 +27,20 @@ val MAX_PACK = listOf(
     "M:region_seek/T:country_id/M:id/N5:lat/N5:lon/b:name_ru/b:name_en/f:f32/n1:alt/S:u16/I:u32/n:temp",
 )
 
+/** The country id behind a variable-size field: country() and countryId() must decode the whole record. */
+val SLOW_PACK = listOf(
+    "b:name_ru/T:id/c2:iso/n2:lat/n2:lon/b:name_en",
+    "S:country_seek/M:id/b:name_ru/b:name_en/b:iso",
+    "M:region_seek/b:name_ru/T:country_id/M:id/N5:lat/N5:lon/b:name_en",
+)
+
+/** The country id at a fixed offset behind other fixed-size fields, with other integer types. */
+val OFFSET_PACK = listOf(
+    "c3:iso3/t:t8/S:id/c2:iso/n2:lat/n2:lon/b:name_ru/b:name_en",
+    "S:country_seek/M:id/b:name_ru/b:name_en/b:iso",
+    "d:area/I:region_seek/c4:code/I:country_id/M:id/N5:lat/N5:lon/b:name_ru/b:name_en",
+)
+
 fun ip2long(ip: String): Long = ip.split('.').fold(0L) { acc, p -> (acc shl 8) or p.toLong() }
 
 fun long2ip(ip: Long): String = "${ip ushr 24 and 255}.${ip ushr 16 and 255}.${ip ushr 8 and 255}.${ip and 255}"
@@ -314,10 +328,10 @@ class TestDb(
         fun random(
             city: Boolean, seed: Int, ranges: Int = 300, rangeLen: Int = 16, idLen: Int = if (city) 3 else 1,
             charset: Int = if (city) 0 else 1, split: Split = if (city) Split.ALWAYS else Split.EMPTY_ONLY,
-            sentinel: Boolean = city, maxPack: Boolean = false,
+            sentinel: Boolean = city, maxPack: Boolean = false, pack: List<String> = if (maxPack) MAX_PACK else CITY_PACK,
         ): TestDb {
             val rnd = Random(seed)
-            val db = TestDb(city, rangeLen, idLen, charset, split, sentinel, if (maxPack) MAX_PACK else CITY_PACK, if (maxPack) 7 else if (city) 4 else 1)
+            val db = TestDb(city, rangeLen, idLen, charset, split, sentinel, pack, if (maxPack) 7 else if (city) 4 else 1)
             fun name(i: Int, ru: Boolean) = when {
                 charset == 1 -> LATIN[i % LATIN.size] + " $i"
                 ru -> NAMES_RU[i % NAMES_RU.size] + " $i"

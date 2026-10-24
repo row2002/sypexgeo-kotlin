@@ -1,0 +1,47 @@
+name: Release
+
+# Runs when a version tag is pushed (1.1.0 or v1.1.0): builds, publishes to Maven Central if the secrets are
+# configured (see RELEASING.md) and creates a GitHub Release with the CHANGELOG section of that version.
+# JitPack needs nothing from here: it builds com.github.row2002:sypexgeo-kotlin:<tag> on first request.
+on:
+  push:
+    tags: ['v*', '[0-9]*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: ./gradlew build -Pversion=${{ steps.version.outputs.version }}
+      - name: Publish to Maven Central
+        if: env.ORG_GRADLE_PROJECT_mavenCentralUsername != '' && env.ORG_GRADLE_PROJECT_mavenCentralPassword != '' && env.ORG_GRADLE_PROJECT_signingInMemoryKey != ''
+        # uploads a deployment to the Central Portal; it is published after "Publish" there (RELEASING.md)
+        run: ./gradlew publishToMavenCentral -Pversion=${{ steps.version.outputs.version }}
+      - name: Skip Maven Central
+        if: env.ORG_GRADLE_PROJECT_mavenCentralUsername == '' || env.ORG_GRADLE_PROJECT_mavenCentralPassword == '' || env.ORG_GRADLE_PROJECT_signingInMemoryKey == ''
+        run: echo "::notice::Maven Central secrets are not configured, skipping the Maven Central upload (see RELEASING.md)"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # the "## [<version>]" section of CHANGELOG.md, without its heading
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } on && /^(## )?\[/ { exit } on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See [CHANGELOG.md](CHANGELOG.md)." > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

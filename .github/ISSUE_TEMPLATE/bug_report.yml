@@ -1,0 +1,47 @@
+name: Bug report
+description: A wrong answer, an exception or another problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please check that the database is up to date (re-download it from sypexgeo.net) first.
+        Сообщить об ошибке можно и по-русски.
+  - type: input
+    id: version
+    attributes:
+      label: Library version
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: info
+    attributes:
+      label: Database info
+      description: "The output of `println(geo.info)`, and the database file name."
+      placeholder: "DbInfo(version=2.2, created=..., type=SxGeo City EN, charset=UTF-8, hasCities=true, ipBlocks=...)"
+    validations:
+      required: true
+  - type: input
+    id: ip
+    attributes:
+      label: IP address
+      description: The IP (or IP string) that gives a wrong result.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: The returned value, or the exception with its stack trace.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: JDK or Android version, Kotlin version.

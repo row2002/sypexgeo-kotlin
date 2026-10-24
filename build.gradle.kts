@@ -1,14 +1,17 @@
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinJvm
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 
 plugins {
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.dokka") version "2.0.0"
+    id("com.vanniktech.maven.publish") version "0.34.0" // 0.35+ needs newer Gradle/Kotlin
     `java-library`
-    `maven-publish`
 }
 
-group = "com.github.row2002"
+// JitPack (sets JITPACK=true) serves com.github.row2002:sypexgeo-kotlin:<tag>; Maven Central uses io.github.row2002
+group = if (System.getenv("JITPACK") == "true") "com.github.row2002" else "io.github.row2002"
 version = findProperty("version")?.takeIf { it != "unspecified" } ?: "1.1.0" // JitPack passes -Pversion=<tag>
 
 repositories {
@@ -24,8 +27,6 @@ dependencies {
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
-    withSourcesJar()
-    withJavadocJar()
 }
 
 kotlin {
@@ -54,10 +55,9 @@ tasks.jar {
     }
 }
 
-// there are no Java sources, so the -javadoc jar carries the Dokka HTML documentation
-tasks.named<Jar>("javadocJar") {
-    // only the HTML directory: the task's other output, dokka-configuration.json, holds absolute build paths
-    from(tasks.named<org.jetbrains.dokka.gradle.tasks.DokkaGeneratePublicationTask>("dokkaGeneratePublicationHtml").flatMap { it.outputDirectory })
+// the -javadoc jar (built by the publish plugin): the Dokka task's other output, dokka-configuration.json, holds absolute build paths
+tasks.withType<org.gradle.jvm.tasks.Jar>().matching { it.name == "dokkaJavadocJar" }.configureEach {
+    exclude("dokka-configuration.json")
 }
 
 tasks.test {
@@ -69,32 +69,37 @@ tasks.test {
     }
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-            pom {
-                name = "sypexgeo-kotlin"
-                description = "Kotlin reader for Sypex Geo 2.2 databases: country, region and city by IPv4 address"
-                url = "https://github.com/row2002/sypexgeo-kotlin"
-                licenses {
-                    license {
-                        name = "MIT License"
-                        url = "https://opensource.org/licenses/MIT"
-                    }
-                }
-                developers {
-                    developer {
-                        id = "row2002"
-                        url = "https://github.com/row2002"
-                    }
-                }
-                scm {
-                    url = "https://github.com/row2002/sypexgeo-kotlin"
-                    connection = "scm:git:https://github.com/row2002/sypexgeo-kotlin.git"
-                    developerConnection = "scm:git:ssh://git@github.com/row2002/sypexgeo-kotlin.git"
-                }
+mavenPublishing {
+    // sources jar, and the Dokka HTML documentation as the -javadoc jar (there are no Java sources)
+    configure(KotlinJvm(javadocJar = JavadocJar.Dokka("dokkaGeneratePublicationHtml"), sourcesJar = true))
+    coordinates(group.toString(), "sypexgeo-kotlin", version.toString())
+    // ./gradlew publishToMavenCentral: credentials in mavenCentralUsername/mavenCentralPassword, see RELEASING.md
+    publishToMavenCentral()
+    // signing is required by Maven Central only; JitPack and publishToMavenLocal work without a key
+    if (providers.gradleProperty("signingInMemoryKey").isPresent) signAllPublications()
+    pom {
+        name = "sypexgeo-kotlin"
+        description = "Kotlin reader for Sypex Geo 2.2 databases: country, region and city by IPv4 address"
+        inceptionYear = "2026"
+        url = "https://github.com/row2002/sypexgeo-kotlin"
+        licenses {
+            license {
+                name = "MIT License"
+                url = "https://opensource.org/licenses/MIT"
+                distribution = "repo"
             }
+        }
+        developers {
+            developer {
+                id = "row2002"
+                name = "row2002"
+                url = "https://github.com/row2002"
+            }
+        }
+        scm {
+            url = "https://github.com/row2002/sypexgeo-kotlin"
+            connection = "scm:git:https://github.com/row2002/sypexgeo-kotlin.git"
+            developerConnection = "scm:git:ssh://git@github.com/row2002/sypexgeo-kotlin.git"
         }
     }
 }

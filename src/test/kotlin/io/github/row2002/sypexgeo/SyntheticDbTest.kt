@@ -1,11 +1,14 @@
 package io.github.row2002.sypexgeo
 
+import java.io.InputStream
 import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.time.Instant
+import java.util.Locale
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -25,6 +28,14 @@ class SyntheticDbTest {
             assertEquals(id, geo.countryId(s), "$label countryId($s)")
             assertEquals(iso, geo.country(s), "$label country($s)")
             assertEquals(info, geo.lookup(s), "$label lookup($s)")
+            // country() and countryId() read only the country id (fast path) but must agree with lookup()
+            assertEquals(info?.country?.id?.takeIf { it > 0 }, id, "$label countryId vs lookup($s)")
+            assertEquals(id?.let { info?.country?.iso?.takeIf { it.isNotEmpty() } }, iso, "$label country vs lookup($s)")
+            val address = InetAddress.getByAddress(ByteArray(4) { (ip ushr (24 - 8 * it)).toByte() })
+            assertEquals(id, geo.countryId(address), "$label countryId(InetAddress $s)")
+            assertEquals(iso, geo.country(address), "$label country(InetAddress $s)")
+            assertEquals(info, geo.lookup(address), "$label lookup(InetAddress $s)")
+            assertEquals(info, geo.lookup("::ffff:$s"), "$label lookup(::ffff:$s)")
             if (info != null) found++
         }
         assertTrue(found >= minFound, "$label: only $found IPs found")
@@ -45,6 +56,77 @@ class SyntheticDbTest {
         verify(TestDb.random(city = true, seed = 7, ranges = 350, rangeLen = 12, charset = 1, maxPack = true), "latin1 max")
         verify(TestDb.random(city = true, seed = 8, rangeLen = 16, split = Split.NEVER), "split never")
         verify(TestDb.random(city = true, seed = 9, rangeLen = 5, idLen = 4, split = Split.EMPTY_ONLY), "id_len 4")
+        verify(TestDb.random(city = true, seed = 30, rangeLen = 11, pack = SLOW_PACK), "country id after a string")
+        verify(TestDb.random(city = true, seed = 31, rangeLen = 13, charset = 2, pack = OFFSET_PACK), "country id at an offset")
+    }
+
+    @Test
+    fun `country fast path reads only the country id`() {
+        // the last city record loses the NUL of its last string: lookup() fails, country() does not need that string
+        // unless the country id comes after a variable-size field (then the whole record is decoded)
+        for ((pack, fast) in listOf(CITY_PACK to true, OFFSET_PACK to true, SLOW_PACK to false)) {
+            val db = TestDb(city = true, pack = pack)
+            db.countries.add(mapOf("id" to 222, "iso" to "UA", "name_en" to "Ukraine", "name_ru" to "Украина"))
+            db.regions["r"] = TestDb.RegionDef(mapOf("id" to 1, "iso" to "UA-30"), 222)
+            db.cities["k"] = TestDb.CityDef(mapOf("id" to 3, "name_en" to "Kyiv", "name_ru" to "Киев"), "r", 222)
+            db.cities["last"] = TestDb.CityDef(mapOf("id" to 6, "name_en" to "Lviv", "name_ru" to "Львов"), "r", 222)
+            db.range("1.2.3.0", "1.2.3.255", Target.CityAt("k"))
+            db.range("1.2.4.0", "1.2.4.255", Target.CityAt("last"))
+            db.range("1.2.5.0", "1.2.5.255", Target.CountryAt(222))
+            val bytes = db.build()
+            val geo = SxGeo(bytes.copyOf().also { it[it.size - 1] = 'x'.code.toByte() })
+            assertEquals("Kyiv", geo.lookup("1.2.3.4")?.city?.nameEn)
+            assertEquals("UA", geo.country("1.2.5.4"))
+            assertCorrupted { geo.lookup("1.2.4.4") }
+            if (fast) {
+                assertEquals("UA", geo.country("1.2.4.4"))
+                assertEquals(222, geo.countryId("1.2.4.4"))
+            } else {
+                assertCorrupted { geo.country("1.2.4.4") }
+                assertCorrupted { geo.countryId("1.2.4.4") }
+            }
+        }
+    }
+
+    @Test
+    fun `country fast path reads ids of any size`() {
+        // ids beyond one byte (no ISO code): 'S' for country records, 'I' for cities in OFFSET_PACK
+        val db = TestDb(city = true, pack = OFFSET_PACK)
+        db.countries.add(mapOf("id" to 1234, "name_en" to "Big"))
+        db.cities["k"] = TestDb.CityDef(mapOf("id" to 3, "name_en" to "Kyiv"), null, 70_000)
+        db.range("1.2.3.0", "1.2.3.255", Target.CountryAt(1234))
+        db.range("1.2.4.0", "1.2.4.255", Target.CityAt("k"))
+        val geo = SxGeo(db.build())
+        assertEquals(1234, geo.countryId("1.2.3.4"))
+        assertEquals(1234, geo.lookup("1.2.3.4")?.country?.id)
+        assertEquals(70_000, geo.countryId("1.2.4.4"))
+        assertEquals(70_000, geo.lookup("1.2.4.4")?.country?.id)
+        assertNull(geo.country("1.2.4.4"))
+    }
+
+    @Test
+    fun `country fast path keeps the bounds checks`() {
+        val db = TestDb(city = true)
+        db.countries.add(mapOf("id" to 222, "iso" to "UA", "name_en" to "Ukraine"))
+        db.cities["k"] = TestDb.CityDef(mapOf("id" to 3, "name_en" to "Kyiv"), null, 222)
+        db.range("1.2.3.0", "1.2.3.255", Target.CityAt("k"))
+        db.build()
+        val end = db.countrySize + db.citySize
+        // records starting 0..3 bytes before the end of the cities section: the country id (offset 3) does not fit
+        for (back in 0..3) db.range("1.2.${4 + back}.0", "1.2.${4 + back}.255", Target.Raw(end - back))
+        // here it fits (the rest of the record does not)
+        db.range("1.2.8.0", "1.2.8.255", Target.Raw(end - 4))
+        val geo = SxGeo(db.build())
+        assertEquals(222, geo.countryId("1.2.3.4"))
+        assertCorrupted { geo.lookup("1.2.8.4") }
+        geo.countryId("1.2.8.4") // reads the record's last byte, whatever it is
+        for (third in 4..7) {
+            val ip = "1.2.$third.4"
+            val expected = assertFailsWith<IllegalStateException> { geo.lookup(ip) }.message
+            assertTrue(expected!!.startsWith("Corrupted Sypex Geo database: city record at offset "), expected)
+            assertEquals(expected, assertFailsWith<IllegalStateException>(ip) { geo.country(ip) }.message)
+            assertEquals(expected, assertFailsWith<IllegalStateException>(ip) { geo.countryId(ip) }.message)
+        }
     }
 
     @Test
@@ -183,17 +265,143 @@ class SyntheticDbTest {
             "08.8.8.8", "8.8.8.08", "010.0.0.1", "1.2.3.04", "001.2.3.4", "1.02.3.4", "0100.0.0.0", "00.1.2.3",
             "\u00001.2.3.4", "1.2.3.4\u0000", "\u00A01.2.3.4", "1.2.3.4\u00A0", "\u20031.2.3.4", "\u30001.2.3.4", "\u000B1.2.3.4", "\u000C1.2.3.4",
             "1.2.3.\u0664", "\uFF11.2.3.4", "1.2.3", "1.2.3.4.5", "1..2.3", "1.2.3.", ".1.2.3", "1.2.3.256", "256.1.1.1", "1.2.3.1234",
-            "-1.2.3.4", "+1.2.3.4", "1.2.3.+4", "1 .2.3.4", "1.2.3. 4", "a.b.c.d", "0x1.2.3.4", "::1", "::ffff:1.2.3.4", "", " ", null,
-            "1.2.3.4, 10.0.0.1", "example.com",
+            "-1.2.3.4", "+1.2.3.4", "1.2.3.+4", "1 .2.3.4", "1.2.3. 4", "a.b.c.d", "0x1.2.3.4", "::1", "", " ", null,
+            "1.2.3.4, 10.0.0.1", "example.com", "1.2.3.4:80", "::ffff:1.2.3.4:80", "[::ffff:1.2.3.4]", "::ffff:", "::ffff:08.8.8.8",
+            "::ffff: 1.2.3.4", " ::ffff:\t1.2.3.4", "::ffff:1.2.3", "::ffff::1.2.3.4", ":ffff:1.2.3.4", "::fff:1.2.3.4", "ffff:1.2.3.4",
+            "0:0:0:0:0:ffff:1.2.3.4", "::ffff:0:1.2.3.4", "::1.2.3.4", "::ffff:0102:0304", "::ffff:1.2.3.4.5", "::\uFF46fff:1.2.3.4",
         )) {
             assertNull(geo.country(ip), ip)
             assertNull(geo.countryId(ip), ip)
             assertNull(geo.lookup(ip), ip)
         }
-        for (ip in listOf("0.0.0.0", "10.1.2.3", "127.0.0.1", "255.255.255.255", "224.0.0.1")) assertNull(geo.lookup(ip), ip)
-        val address = InetAddress.getByAddress(byteArrayOf(1, 2, 3, 4)) as Inet4Address
-        assertEquals("UA", geo.country(address))
-        assertEquals(geo.lookup("1.2.3.4"), geo.lookup(address))
+        for (ip in listOf("0.0.0.0", "10.1.2.3", "127.0.0.1", "255.255.255.255", "224.0.0.1", "::ffff:127.0.0.1")) assertNull(geo.lookup(ip), ip)
+        // IPv4-mapped IPv6, the prefix in any case
+        for (ip in listOf("::ffff:1.2.3.4", "::FFFF:1.2.3.4", "::fFfF:1.2.3.4", " ::ffff:1.2.3.4\r\n", "\t::Ffff:1.2.3.0")) {
+            assertEquals("UA", geo.country(ip), ip)
+            assertEquals(222, geo.countryId(ip), ip)
+            assertEquals(geo.lookup("1.2.3.4"), geo.lookup(ip), ip)
+        }
+        assertEquals("US", geo.country("::ffff:8.8.8.8"))
+    }
+
+    @Test
+    fun `InetAddress overloads`() {
+        val geo = smallCountryDb()
+        val v4 = InetAddress.getByAddress(byteArrayOf(1, 2, 3, 4)) as Inet4Address
+        val asInet: InetAddress = v4
+        assertEquals("UA", geo.country(v4))
+        assertEquals("UA", geo.country(asInet))
+        assertEquals(222, geo.countryId(v4))
+        assertEquals(222, geo.countryId(asInet))
+        assertEquals(geo.lookup("1.2.3.4"), geo.lookup(v4))
+        assertEquals(geo.lookup("1.2.3.4"), geo.lookup(asInet))
+        assertEquals("RU", geo.country(InetAddress.getByAddress(byteArrayOf(100, 0, 0, 0))))
+        // high octets are unsigned
+        assertNull(geo.country(InetAddress.getByAddress(byteArrayOf(-1, -1, -1, -1))))
+        assertNull(geo.lookup(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))))
+        // the JDK turns IPv4-mapped IPv6 into an Inet4Address
+        val mapped = InetAddress.getByAddress(ByteArray(16).also { it[10] = -1; it[11] = -1; it[12] = 1; it[13] = 2; it[14] = 3; it[15] = 4 })
+        assertTrue(mapped is Inet4Address)
+        assertEquals("UA", geo.country(mapped))
+        assertEquals("UA", geo.country(InetAddress.getByName("::ffff:1.2.3.4")))
+        // real IPv6, including the IPv4-compatible ::1.2.3.4: not found
+        for (v6 in listOf(InetAddress.getByName("2001:db8::1"), InetAddress.getByName("::1.2.3.4"), InetAddress.getByName("::1"),
+            Inet6Address.getByAddress(null, ByteArray(16).also { it[10] = -1; it[11] = -1; it[12] = 1; it[13] = 2; it[14] = 3; it[15] = 4 }, null))) {
+            assertTrue(v6 is Inet6Address, v6.toString())
+            assertNull(geo.lookup(v6), v6.toString())
+            assertNull(geo.country(v6), v6.toString())
+            assertNull(geo.countryId(v6), v6.toString())
+        }
+    }
+
+    @Test
+    fun `localized names`() {
+        val ru = Locale("ru")
+        val locales = listOf(Locale.ENGLISH, Locale.GERMAN, Locale.ROOT, Locale.forLanguageTag("uk-UA"))
+        val country = Country(185, "RU", "Россия", "Russia")
+        val region = Region(1, "RU-MOW", "Москва", "Moscow", emptyMap())
+        val city = City(2, "Москва", "Moscow", 55.75, 37.62, emptyMap())
+        for (l in listOf(ru, Locale.forLanguageTag("ru-RU"), Locale("RU", "UA"))) {
+            assertEquals("Россия", country.name(l))
+            assertEquals("Москва", region.name(l))
+            assertEquals("Москва", city.name(l))
+        }
+        for (l in locales) {
+            assertEquals("Russia", country.name(l))
+            assertEquals("Moscow", region.name(l))
+            assertEquals("Moscow", city.name(l))
+        }
+        // a missing name falls back to the other language
+        assertEquals("Russia", country.copy(nameRu = "").name(ru))
+        assertEquals("Россия", country.copy(nameEn = "").name(Locale.ENGLISH))
+        assertEquals("Moscow", region.copy(nameRu = "").name(ru))
+        assertEquals("Москва", city.copy(nameEn = "").name(Locale.GERMAN))
+        assertEquals("", Country(185, "RU").name(ru))
+        assertEquals("", Country(185, "RU").name(Locale.ENGLISH))
+    }
+
+    @Test
+    fun `input stream constructor reads to the end and does not close the stream`() {
+        val bytes = TestDb.random(city = true, seed = 5).build()
+        var closed = false
+        // returns at most 1000 bytes per read call
+        val stream = object : java.io.ByteArrayInputStream(bytes) {
+            override fun read(b: ByteArray, off: Int, len: Int) = super.read(b, off, minOf(len, 1000))
+            override fun close() { closed = true }
+        }
+        val geo = SxGeo(stream)
+        assertTrue(!closed)
+        assertEquals(-1, stream.read())
+        val reference = SxGeo(bytes)
+        val ips = List(2000) { long2ip((it.toLong() * 2_147_483_647L) % 0xE0000000L) }
+        assertEquals(ips.map(reference::lookup), ips.map(geo::lookup))
+        val failing = object : InputStream() { override fun read(): Int = throw java.io.IOException("boom") }
+        assertEquals("boom", assertFailsWith<java.io.IOException> { SxGeo(failing) }.message)
+        // no file name to prefix the message with
+        assertEquals("Not a Sypex Geo database: file is empty or too short (0 bytes)",
+            assertFailsWith<IllegalArgumentException> { SxGeo(java.io.ByteArrayInputStream(ByteArray(0))) }.message)
+    }
+
+    @Test
+    fun `constructor errors say what the data looks like`() {
+        val prefix = "Not a Sypex Geo database: "
+        val zip = "this is a ZIP archive - unzip it and pass the .dat file"
+        val html = "looks like an HTML page - the download probably failed"
+        val mmdb = "this is a MaxMind .mmdb file"
+        fun message(data: ByteArray) = assertFailsWith<IllegalArgumentException> { SxGeo(data) }.message
+        fun bytes(s: String) = s.toByteArray(Charsets.UTF_8)
+        val marker = byteArrayOf(0xAB.toByte(), 0xCD.toByte(), 0xEF.toByte()) + bytes("MaxMind.com")
+        val random = kotlin.random.Random(1)
+        assertEquals(prefix + zip, message(byteArrayOf(0x50, 0x4B, 3, 4) + random.nextBytes(5000)))
+        assertEquals(prefix + zip, message(byteArrayOf(0x50, 0x4B, 3, 4)))
+        for (page in listOf("<!DOCTYPE html><html><body>Not found</body></html>", "<html>", "<", "\uFEFF<!doctype html>",
+            " \r\n\t<?xml version=\"1.0\"?>", "\uFEFF\n  <HTML>" + "x".repeat(100))) {
+            assertEquals(prefix + html, message(bytes(page)), page)
+        }
+        assertEquals(prefix + mmdb, message(random.nextBytes(300_000) + marker + random.nextBytes(20_000)))
+        assertEquals(prefix + mmdb, message(marker))
+        assertEquals("Not a Sypex Geo database", message(marker + ByteArray(128 * 1024))) // too far from the end
+        assertEquals(prefix + "file is empty or too short (0 bytes)", message(ByteArray(0)))
+        assertEquals(prefix + "file is empty or too short (3 bytes)", message(bytes("SxG")))
+        assertEquals(prefix + "file is empty or too short (39 bytes)", message(TestDb.random(city = false, seed = 1).build().copyOf(39)))
+        assertEquals("Not a Sypex Geo database", message(ByteArray(100)))
+        assertEquals("Not a Sypex Geo database", message(bytes("PK\u0005\u0006" + "x".repeat(100)))) // not a local file header
+        assertEquals("Not a Sypex Geo database", message(bytes("x<html>" + "x".repeat(100))))
+
+        // the Path and File constructors start the message with the file name
+        val file = Files.createTempFile("sxgeo", ".zip")
+        try {
+            Files.write(file, byteArrayOf(0x50, 0x4B, 3, 4) + ByteArray(100))
+            assertEquals("$file: $prefix$zip", assertFailsWith<IllegalArgumentException> { SxGeo(file) }.message)
+            assertEquals("$file: $prefix$zip", assertFailsWith<IllegalArgumentException> { SxGeo(file.toFile()) }.message)
+            Files.write(file, TestDb.random(city = false, seed = 1).build().let { it.copyOf(it.size - 1) })
+            assertEquals("$file: Truncated Sypex Geo database", assertFailsWith<IllegalArgumentException> { SxGeo(file) }.message)
+            assertEquals("$file: Truncated Sypex Geo database", assertFailsWith<IllegalArgumentException> { SxGeo(file.toFile()) }.message)
+            Files.write(file, ByteArray(0))
+            assertEquals("$file: ${prefix}file is empty or too short (0 bytes)", assertFailsWith<IllegalArgumentException> { SxGeo(file) }.message)
+        } finally {
+            Files.delete(file)
+        }
     }
 
     @Test
