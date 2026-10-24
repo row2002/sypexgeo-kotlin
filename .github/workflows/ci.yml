@@ -18,7 +18,7 @@ jobs:
       - id: key
         run: echo "key=sypexgeo-testdata-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
       - id: cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: testdata
           key: ${{ steps.key.outputs.key }}
@@ -62,7 +62,7 @@ jobs:
           java-version: ${{ matrix.java < 17 && 17 || matrix.java }}
       # caches Gradle (open-source actions/cache based caching; v6 defaults to a proprietary one) and validates the wrapper jar
       - uses: gradle/actions/setup-gradle@v5
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: testdata
           key: ${{ needs.testdata.outputs.key }}
