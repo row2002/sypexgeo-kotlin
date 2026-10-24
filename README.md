@@ -15,35 +15,23 @@
 
 ## Установка
 
-Библиотека публикуется через [JitPack](https://jitpack.io/#row2002/sypexgeo-kotlin).
+Библиотека опубликована в [Maven Central](https://central.sonatype.com/artifact/io.github.row2002/sypexgeo-kotlin).
 
 **Gradle (Kotlin DSL)**
 
 ```kotlin
-repositories {
-    mavenCentral()
-    maven("https://jitpack.io")
-}
-
 dependencies {
-    implementation("com.github.row2002:sypexgeo-kotlin:1.0.0")
+    implementation("io.github.row2002:sypexgeo-kotlin:1.0.1")
 }
 ```
 
 **Maven**
 
 ```xml
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
-
 <dependency>
-    <groupId>com.github.row2002</groupId>
+    <groupId>io.github.row2002</groupId>
     <artifactId>sypexgeo-kotlin</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
 </dependency>
 ```
 
